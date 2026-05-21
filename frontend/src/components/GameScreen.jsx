@@ -65,10 +65,14 @@ export default function GameScreen({ gameData, playerId, role, onAction }) {
     }
   }, [keysPressed[' '], gameData, playerId, onAction]);
 
-  // Handle heal with E
+  // Handle abilities with E
   useEffect(() => {
-    if (!keysPressed['e'] || role !== 'mage') return;
-    onAction({ type: 'ability', abilityName: 'heal' });
+    if (!keysPressed['e']) return;
+    if (role === 'mage') {
+      onAction({ type: 'ability', abilityName: 'heal' });
+    } else if (role === 'warrior') {
+      onAction({ type: 'ability', abilityName: 'shield' });
+    }
   }, [keysPressed['e'], role, onAction]);
 
   // Draw game
@@ -116,6 +120,16 @@ export default function GameScreen({ gameData, playerId, role, onAction }) {
     // Draw players
     players.forEach(player => {
       const isCurrentPlayer = player.playerId === playerId;
+
+      // Draw shield if active
+      if (player.shieldActive) {
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, 28, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
       ctx.fillStyle = player.role === 'warrior' ? '#4ecdc4' : '#ffe66d';
       ctx.beginPath();
       ctx.arc(player.x, player.y, 20, 0, Math.PI * 2);
@@ -160,7 +174,8 @@ export default function GameScreen({ gameData, playerId, role, onAction }) {
 
       // Controls
       ctx.font = '12px sans-serif';
-      ctx.fillText('WASD: Move | Space: Attack | E: Ability', 20, height - 20);
+      const abilityName = currentPlayer.role === 'warrior' ? 'Shield' : 'Heal';
+      ctx.fillText(`WASD: Move | Space: Attack | E: ${abilityName}`, 20, height - 20);
     }
   }, [gameData, playerId]);
 

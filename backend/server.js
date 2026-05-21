@@ -54,7 +54,9 @@ class GameRoom {
       maxMana: 100,
       attacking: false,
       attackCooldown: 0,
-      lastAttackTime: 0
+      lastAttackTime: 0,
+      shieldActive: false,
+      shieldEndTime: 0
     });
     return true;
   }
@@ -98,6 +100,11 @@ class GameRoom {
       if (player.role === 'mage' && player.mana < player.maxMana) {
         player.mana += 0.5; // mana regen
       }
+
+      // Update shield
+      if (player.shieldActive && Date.now() > player.shieldEndTime) {
+        player.shieldActive = false;
+      }
     });
 
     // Update enemies
@@ -126,7 +133,8 @@ class GameRoom {
 
         // Simple attack
         if (dist < 50 && Math.random() < 0.01) {
-          nearest.health -= 10;
+          const damage = nearest.shieldActive ? 5 : 10;
+          nearest.health -= damage;
         }
       }
 
@@ -277,6 +285,13 @@ io.on('connection', (socket) => {
         player.mana -= 50;
         io.to(roomId).emit('game:stateUpdate', room.getState());
       }
+    }
+
+    if (abilityName === 'shield' && player.role === 'warrior') {
+      // Activate shield for 5 seconds
+      player.shieldActive = true;
+      player.shieldEndTime = Date.now() + 5000;
+      io.to(roomId).emit('game:stateUpdate', room.getState());
     }
   });
 
