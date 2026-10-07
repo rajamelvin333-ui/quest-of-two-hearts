@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import GameScreen from './components/GameScreen';
 import LobbyScreen from './components/LobbyScreen';
 import './App.css';
+
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
 function App() {
   const [gameState, setGameState] = useState('lobby');
@@ -12,8 +14,6 @@ function App() {
   const socketRef = useRef(null);
   const [gameData, setGameData] = useState(null);
   const [result, setResult] = useState(null);
-
-  const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
@@ -45,32 +45,34 @@ function App() {
     };
   }, []);
 
-  const createRoom = () => {
-    socketRef.current.emit('game:createRoom', (data) => {
-      setRoomId(data.roomId);
-      setRole('warrior');
-      console.log('Room created:', data.roomId);
-    });
+  const handleJoined = (response, onFail) => {
+    if (response.success) {
+      setRoomId(response.roomId);
+      setPlayerId(response.playerId);
+      setRole(response.role);
+      console.log('Joined room:', response.roomId);
+    } else {
+      alert(response.error);
+      onFail?.();
+    }
   };
 
-  const joinRoom = (roomId, playerName, selectedRole) => {
+  const createRoom = (playerName, selectedRole, onFail) => {
+    socketRef.current.emit('game:createRoom', {
+      playerName,
+      role: selectedRole
+    }, (response) => handleJoined(response, onFail));
+  };
+
+  const joinRoom = (roomId, playerName, selectedRole, onFail) => {
     socketRef.current.emit('game:joinRoom', {
       roomId,
       playerName,
       role: selectedRole
-    }, (response) => {
-      if (response.success) {
-        setRoomId(response.roomId);
-        setPlayerId(response.playerId);
-        setRole(selectedRole);
-        console.log('Joined room:', response.roomId);
-      } else {
-        alert(response.error);
-      }
-    });
+    }, (response) => handleJoined(response, onFail));
   };
 
-  const handleGameAction = (action) => {
+  const handleGameAction = useCallback((action) => {
     if (!roomId || !playerId) return;
     const eventName = `player:${action.type}`;
     socketRef.current.emit(eventName, {
@@ -78,7 +80,7 @@ function App() {
       playerId,
       ...action
     });
-  };
+  }, [roomId, playerId]);
 
   const resetGame = () => {
     setGameState('lobby');
@@ -109,8 +111,12 @@ function App() {
       )}
       {gameState === 'ended' && (
         <div className="end-screen">
-          <h1>{result === 'victory' ? '🎉 VICTORY!' : '💀 DEFEAT'}</h1>
-          <button onClick={resetGame}>Play Again</button>
+          <h1>
+            {result === 'victory' ? '🎉 VICTORY!'
+              : result === 'disconnect' ? '💔 Partner disconnected'
+              : '💀 DEFEAT'}
+          </h1>
+          <button className="btn btn-primary btn-large" onClick={resetGame}>Play Again</button>
         </div>
       )}
     </div>

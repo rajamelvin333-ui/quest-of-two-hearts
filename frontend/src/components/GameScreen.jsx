@@ -29,22 +29,22 @@ export default function GameScreen({ gameData, playerId, role, onAction }) {
     };
   }, []);
 
-  // Handle movement
-  useEffect(() => {
-    let direction = 'stop';
-    if (keysPressed['w']) direction = 'up';
-    else if (keysPressed['s']) direction = 'down';
-    else if (keysPressed['a']) direction = 'left';
-    else if (keysPressed['d']) direction = 'right';
+  let direction = 'stop';
+  if (keysPressed['w']) direction = 'up';
+  else if (keysPressed['s']) direction = 'down';
+  else if (keysPressed['a']) direction = 'left';
+  else if (keysPressed['d']) direction = 'right';
+  const attackHeld = !!keysPressed[' '];
+  const abilityHeld = !!keysPressed['e'];
 
-    if (direction !== 'stop') {
-      onAction({ type: 'move', direction });
-    }
-  }, [keysPressed, onAction]);
+  // Handle movement (also sends 'stop' when keys are released)
+  useEffect(() => {
+    onAction({ type: 'move', direction });
+  }, [direction, onAction]);
 
   // Handle attack with space
   useEffect(() => {
-    if (!keysPressed[' '] || !gameData) return;
+    if (!attackHeld || !gameData) return;
 
     const currentPlayer = gameData.players.find(p => p.playerId === playerId);
     if (!currentPlayer || gameData.enemies.length === 0) return;
@@ -63,13 +63,13 @@ export default function GameScreen({ gameData, playerId, role, onAction }) {
     if (minDist < 150) {
       onAction({ type: 'attack', targetId: nearest.id });
     }
-  }, [keysPressed[' '], gameData, playerId, onAction]);
+  }, [attackHeld, gameData, playerId, onAction]);
 
   // Handle heal with E
   useEffect(() => {
-    if (!keysPressed['e'] || role !== 'mage') return;
+    if (!abilityHeld || role !== 'mage') return;
     onAction({ type: 'ability', abilityName: 'heal' });
-  }, [keysPressed['e'], role, onAction]);
+  }, [abilityHeld, role, onAction]);
 
   // Draw game
   useEffect(() => {
@@ -117,15 +117,26 @@ export default function GameScreen({ gameData, playerId, role, onAction }) {
     players.forEach(player => {
       const isCurrentPlayer = player.playerId === playerId;
       ctx.fillStyle = player.role === 'warrior' ? '#4ecdc4' : '#ffe66d';
+      ctx.globalAlpha = player.health > 0 ? 1 : 0.3;
       ctx.beginPath();
       ctx.arc(player.x, player.y, 20, 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Ring around your own character
+      if (isCurrentPlayer) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, 24, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       // Player name
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(player.playerId.split('-')[0], player.x, player.y - 35);
+      ctx.fillText(player.playerName || player.playerId.split('-')[0], player.x, player.y - 35);
 
       // Health bar
       const healthPercent = player.health / player.maxHealth;

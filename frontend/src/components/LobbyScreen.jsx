@@ -7,7 +7,11 @@ export default function LobbyScreen({ roomId, role, onCreateRoom, onJoinRoom }) 
   const [selectedRole, setSelectedRole] = useState('warrior');
 
   const handleCreate = () => {
-    onCreateRoom();
+    if (!playerName) {
+      alert('Enter your name');
+      return;
+    }
+    onCreateRoom(playerName, selectedRole, () => setScreen('create'));
     setScreen('waiting');
   };
 
@@ -16,9 +20,11 @@ export default function LobbyScreen({ roomId, role, onCreateRoom, onJoinRoom }) 
       alert('Enter room ID and your name');
       return;
     }
-    onJoinRoom(joinRoomId, playerName, selectedRole);
+    onJoinRoom(joinRoomId, playerName, selectedRole, () => setScreen('join'));
     setScreen('waiting');
   };
+
+  const shownRole = role || selectedRole;
 
   return (
     <div className="lobby-screen">
@@ -113,7 +119,7 @@ export default function LobbyScreen({ roomId, role, onCreateRoom, onJoinRoom }) 
               </div>
             )}
             <div className="spinner"></div>
-            <p>Your role: {selectedRole === 'warrior' ? '⚔️ Warrior' : '🔮 Mage'}</p>
+            <p>Your role: {shownRole === 'warrior' ? '⚔️ Warrior' : '🔮 Mage'}</p>
           </div>
         )}
       </div>
