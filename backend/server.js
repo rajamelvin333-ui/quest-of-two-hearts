@@ -38,10 +38,17 @@ class GameRoom {
     this.wave = 0;
   }
 
-  addPlayer(playerId, socketId, role) {
-    if (this.players.size >= 2) return false;
+  addPlayer(playerId, socketId, role, playerName) {
+    if (this.players.size >= 2) return null;
+
+    // Co-op needs one of each role: if the requested role is taken, take the other
+    const taken = Array.from(this.players.values()).map(p => p.role);
+    if (role !== 'warrior' && role !== 'mage') role = 'warrior';
+    if (taken.includes(role)) role = role === 'warrior' ? 'mage' : 'warrior';
+
     this.players.set(playerId, {
       playerId,
+      playerName,
       socketId,
       role,
       x: role === 'warrior' ? 200 : 800,
@@ -56,7 +63,7 @@ class GameRoom {
       attackCooldown: 0,
       lastAttackTime: 0
     });
-    return true;
+    return role;
   }
 
   spawnEnemies() {
@@ -85,6 +92,7 @@ class GameRoom {
 
     // Update player positions
     this.players.forEach(player => {
+      if (player.health <= 0) return;
       const speed = player.role === 'warrior' ? WARRIOR_SPEED : MAGE_SPEED;
       player.x += player.vx * speed;
       player.y += player.vy * speed;
@@ -104,10 +112,11 @@ class GameRoom {
     this.enemies = this.enemies.filter(enemy => enemy.health > 0);
 
     this.enemies.forEach(enemy => {
-      // Chase nearest player
+      // Chase nearest living player
       let nearest = null;
       let minDist = Infinity;
       this.players.forEach(player => {
+        if (player.health <= 0) return;
         const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
         if (dist < minDist) {
           minDist = dist;
@@ -126,7 +135,7 @@ class GameRoom {
 
         // Simple attack
         if (dist < 50 && Math.random() < 0.01) {
-          nearest.health -= 10;
+          nearest.health = Math.max(0, nearest.health - 10);
         }
       }
 
@@ -174,14 +183,74 @@ app.get('/api/health', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
 
-  socket.on('game:createRoom', (callback) => {
+  // Leaving a room ends it: abandon a waiting room, or end a running game for the partner
+  const leaveCurrentRoom = () => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
+    socket.leave(roomId);
+    socket.data.roomId = null;
+    socket.data.playerId = null;
+
+    const room = GAME_ROOMS.get(roomId);
+    if (!room) return;
+    if (room.status === 'playing') {
+      io.to(roomId).emit('game:ended', {
+        result: 'disconnect',
+        stats: room.getState()
+      });
+    }
+    GAME_ROOMS.delete(roomId);
+  };
+
+  const joinRoom = (room, playerName, requestedRole, callback) => {
+    const roomId = room.roomId;
+    if (room.players.size >= 2) {
+      callback({ success: false, error: 'Room full' });
+      return;
+    }
+    if (socket.data.roomId !== roomId) leaveCurrentRoom();
+
+    const playerId = `${playerName}-${socket.id}`;
+    const role = room.addPlayer(playerId, socket.id, requestedRole, playerName);
+
+    if (!role) {
+      callback({ success: false, error: 'Room full' });
+      return;
+    }
+
+    socket.join(roomId);
+    socket.data.roomId = roomId;
+    socket.data.playerId = playerId;
+
+    // Notify other player
+    socket.to(roomId).emit('game:playerJoined', {
+      playerId,
+      playerName,
+      role
+    });
+
+    callback({ success: true, roomId, playerId, role });
+
+    // Start game if 2 players
+    if (room.players.size === 2) {
+      room.status = 'playing';
+      room.startTime = Date.now();
+      room.spawnEnemies();
+      io.to(roomId).emit('game:started', room.getState());
+    }
+  };
+
+  socket.on('game:createRoom', (data, callback) => {
+    if (!data || typeof callback !== 'function') return;
+    const { playerName, role } = data;
     const roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
     const room = new GameRoom(roomId);
     GAME_ROOMS.set(roomId, room);
-    callback({ roomId });
+    joinRoom(room, playerName, role, callback);
   });
 
   socket.on('game:joinRoom', (data, callback) => {
+    if (!data || typeof callback !== 'function') return;
     const { roomId, playerName, role } = data;
     const room = GAME_ROOMS.get(roomId);
 
@@ -190,33 +259,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const playerId = `${playerName}-${socket.id}`;
-    const success = room.addPlayer(playerId, socket.id, role);
-
-    if (success) {
-      socket.join(roomId);
-      socket.data.roomId = roomId;
-      socket.data.playerId = playerId;
-
-      // Notify other player
-      socket.to(roomId).emit('game:playerJoined', {
-        playerId,
-        playerName,
-        role
-      });
-
-      // Start game if 2 players
-      if (room.players.size === 2) {
-        room.status = 'playing';
-        room.startTime = Date.now();
-        room.spawnEnemies();
-        io.to(roomId).emit('game:started', room.getState());
-      }
-
-      callback({ success: true, roomId, playerId });
-    } else {
-      callback({ success: false, error: 'Room full' });
-    }
+    joinRoom(room, playerName, role, callback);
   });
 
   socket.on('player:move', (data) => {
@@ -225,7 +268,7 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     const player = room.players.get(playerId);
-    if (!player) return;
+    if (!player || player.health <= 0) return;
 
     // Set velocity based on direction
     const dirs = {
@@ -249,7 +292,7 @@ io.on('connection', (socket) => {
     const player = room.players.get(playerId);
     const target = room.enemies.find(e => e.id === targetId);
 
-    if (!player || !target) return;
+    if (!player || !target || player.health <= 0) return;
 
     if (player.attackCooldown > 0) return;
 
@@ -266,13 +309,13 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     const player = room.players.get(playerId);
-    if (!player) return;
+    if (!player || player.health <= 0) return;
 
     if (abilityName === 'heal' && player.role === 'mage') {
       if (player.mana >= 50) {
-        // Heal all players
+        // Heal all living players
         room.players.forEach(p => {
-          p.health = Math.min(p.maxHealth, p.health + 50);
+          if (p.health > 0) p.health = Math.min(p.maxHealth, p.health + 50);
         });
         player.mana -= 50;
         io.to(roomId).emit('game:stateUpdate', room.getState());
@@ -282,14 +325,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
-    const roomId = socket.data.roomId;
-    if (roomId) {
-      const room = GAME_ROOMS.get(roomId);
-      if (room) {
-        room.status = 'ended';
-        room.result = 'disconnect';
-      }
-    }
+    leaveCurrentRoom();
   });
 });
 
@@ -298,7 +334,7 @@ setInterval(() => {
   GAME_ROOMS.forEach((room, roomId) => {
     if (room.status === 'playing') {
       room.update(1000 / TICK_RATE);
-      room.spawnEnemies();
+      if (room.status === 'playing') room.spawnEnemies();
 
       io.to(roomId).emit('game:stateUpdate', room.getState());
 
@@ -307,6 +343,7 @@ setInterval(() => {
           result: room.result,
           stats: room.getState()
         });
+        GAME_ROOMS.delete(roomId);
       }
     }
   });

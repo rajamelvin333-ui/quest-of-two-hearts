@@ -38,6 +38,7 @@ body {
 
 .lobby-container h1 {
   font-size: 48px;
+  line-height: 1.15;
   margin-bottom: 10px;
   background: linear-gradient(135deg, #4ecdc4, #ffe66d);
   -webkit-background-clip: text;
@@ -206,6 +207,8 @@ body {
 
 .end-screen h1 {
   font-size: 72px;
+  line-height: 1.15;
+  color: #fff;
   margin-bottom: 40px;
   animation: bounce 0.6s ease-in-out;
 }
